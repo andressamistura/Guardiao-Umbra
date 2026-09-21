@@ -57,9 +57,20 @@ suporte a tool calling) em `agente/agentcore_setup.py`.
 
 ### 1) Subir o agente
 ```bash
-export S3_BUCKET_KB=<seu-bucket>
+export S3_BUCKET_KB=<seu-bucket-de-documentos>       # bucket S3 comum (fonte de dados)
+export S3_VECTOR_BUCKET=<nome-do-bucket-vetorial>    # bucket S3 Vectors (embeddings)
+export S3_VECTOR_INDEX=<nome-do-indice-vetorial>
+# Se seu usuário não tiver permissão de IAM (comum em contas de sandbox),
+# peça ao administrador um role pronto para a Knowledge Base (ver
+# planejamento.md, seção 5) e informe o ARN aqui em vez de deixar o script
+# tentar criar um novo role:
+# export BEDROCK_KB_ROLE_ARN=<arn-do-role>
 python agente/agentcore_setup.py
 ```
+A Knowledge Base usa **Amazon S3 Vectors** como armazenamento vetorial (não
+OpenSearch Serverless) para caber no orçamento de créditos disponível. Ver
+planejamento.md, seção 5, para o porquê.
+
 Copie o ARN do endpoint retornado para a variável `UMBRA_AGENT_ARN`
 (usada por `agente/agent_client.py`).
 
@@ -98,5 +109,9 @@ Finalize `relatorio/relatorio_final.md` com os números reais obtidos.
 ## Estratégia de custo
 
 Agente em modelo mínimo (Titan Text Lite) + juiz mínimo (Nova Micro), ambos
-na mesma conta AWS, para caber no orçamento de créditos disponível. Ver
-seção 1.4 de `planejamento.md` para os riscos assumidos com essa escolha.
+na mesma conta AWS, e Knowledge Base em **S3 Vectors** (não OpenSearch
+Serverless, que cobra por capacidade reservada mesmo ocioso), para caber
+no orçamento de créditos disponível. Ver seção 1.4 de `planejamento.md`
+para os riscos do agente/juiz, e a seção 5 para a escolha do armazenamento
+vetorial. Recomendado configurar um alarme de orçamento (AWS Budgets) em
+~US$15-18 para não passar do limite mensal.
