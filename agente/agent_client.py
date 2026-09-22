@@ -1,15 +1,22 @@
 """
-Cliente fino para invocar o agente BiblioAtende publicado no AgentCore.
-Usado por: sessão exploratória, dataset (geração de respostas), suíte DeepEval
-e campanha de red teaming — para que todos consultem exatamente o mesmo
-agente em produção/teste.
+Cliente fino para invocar o Harness "guardiao_umbra_harness" publicado no
+AgentCore (não o Runtime "puro" do bedrock-agentcore-starter-toolkit; o
+deploy real deste projeto usa Harness, criado via console, ver
+planejamento.md secao 6). Usado por: sessão exploratória, dataset (geração
+de respostas), suíte DeepEval e campanha de red teaming, para que todos
+consultem exatamente o mesmo agente em produção/teste.
+
+O formato de chamada abaixo (client.invoke_harness, resposta em streaming
+via response['stream'] com eventos 'contentBlockDelta') foi copiado
+diretamente do "View invocation code" da página de detalhes do Harness no
+console AWS (Amazon Bedrock AgentCore > Harness > guardiao_umbra_harness),
+não é um formato genérico assumido.
 
 Uso:
     from agent_client import AgentClient
     client = AgentClient()
     resposta = client.invoke("Vocês têm o livro 1984?", session_id="teste-1")
     resposta2 = client.invoke("Tem exemplar disponível?", session_id="teste-1")
-    contextos_usados = client.ultimo_contexto_recuperado  # para Faithfulness
 """
 
 import os
@@ -17,37 +24,53 @@ import uuid
 
 import boto3
 
-AGENT_RUNTIME_ARN = os.environ.get("BIBLIOATENDE_AGENT_ARN", "arn:aws:bedrock-agentcore:...:runtime/biblioatende")
+# ARN do Harness (não é um Runtime ARN "solto"; é o ARN do próprio Harness,
+# copiado da página de detalhes do console). Sobrescreva via variável de
+# ambiente UMBRA_HARNESS_ARN se o Harness for recriado (o ID muda).
+HARNESS_ARN = os.environ.get(
+    "UMBRA_HARNESS_ARN",
+    "arn:aws:bedrock-agentcore:us-east-1:399643456741:harness/guardiao_umbra_harness-khBuoq54rO",
+)
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 
 
 class AgentClient:
-    def __init__(self, agent_arn: str = AGENT_RUNTIME_ARN, region: str = AWS_REGION):
-        self.agent_arn = agent_arn
+    def __init__(self, harness_arn: str = HARNESS_ARN, region: str = AWS_REGION):
+        self.harness_arn = harness_arn
         self.client = boto3.client("bedrock-agentcore", region_name=region)
-        self.ultimo_contexto_recuperado: list[str] = []
 
     def invoke(self, mensagem: str, session_id: str | None = None) -> str:
         """Envia uma mensagem ao agente, mantendo memória de sessão quando
         session_id é reaproveitado entre chamadas (necessário para os casos
-        multi-turno do golden dataset)."""
+        multi-turno do golden dataset). Concatena os deltas de texto do
+        streaming de resposta em uma única string.
+
+        NOTA: o Harness não retorna aqui, junto da resposta, os trechos de
+        contexto recuperados da Knowledge Base (isso aparece só no "Agent
+        trace" do playground do console, via observability). Para a métrica
+        de Faithfulness do DeepEval, ou capturamos esse trace por outra via
+        (CloudWatch/observability do AgentCore) antes de rodar a suíte, ou
+        avaliamos Faithfulness comparando a resposta diretamente contra
+        agente/knowledge_base/catalogo.json (fonte da verdade do RAG). Isso
+        ainda precisa ser decidido/implementado antes do passo 3 do README.
+        """
         session_id = session_id or str(uuid.uuid4())
 
-        resposta = self.client.invoke_agent_runtime(
-            agentRuntimeArn=self.agent_arn,
+        resposta = self.client.invoke_harness(
+            harnessArn=self.harness_arn,
             runtimeSessionId=session_id,
-            payload={"prompt": mensagem},
+            messages=[
+                {"role": "user", "content": [{"text": mensagem}]},
+            ],
         )
 
-        corpo = resposta["response"].read()
-        payload = corpo if isinstance(corpo, dict) else __import__("json").loads(corpo)
+        texto_completo = []
+        for evento in resposta["stream"]:
+            delta = evento.get("contentBlockDelta", {}).get("delta", {})
+            if "text" in delta:
+                texto_completo.append(delta["text"])
 
-        # Guarda os trechos de contexto recuperados pela ferramenta de RAG,
-        # quando o AgentCore os retorna nos metadados de trace — usado como
-        # 'retrieval_context' na métrica de Faithfulness do DeepEval.
-        self.ultimo_contexto_recuperado = payload.get("retrieved_context", [])
-
-        return payload.get("output", payload.get("completion", ""))
+        return "".join(texto_completo)
 
 
 class AgentClientMock(AgentClient):
@@ -67,7 +90,7 @@ class AgentClientMock(AgentClient):
 
     def invoke(self, mensagem: str, session_id: str | None = None) -> str:
         raise NotImplementedError(
-            "AgentClientMock é só um placeholder de desenvolvimento — "
+            "AgentClientMock é só um placeholder de desenvolvimento: "
             "substitua por chamadas reais ao agente publicado no AgentCore "
             "antes de rodar a suíte de avaliação de verdade."
         )
