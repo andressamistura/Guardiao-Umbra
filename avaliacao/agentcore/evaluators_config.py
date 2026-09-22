@@ -4,7 +4,7 @@ Frente A, AgentCore Evaluations.
 Configura:
   - 2 avaliadores INTEGRADOS (built-in) do AgentCore
   - 1 avaliador CUSTOMIZADO (baseado em regra/código), específico do
-    BiblioAtende
+    Guardião da Umbra
 
 Juiz (avaliadores baseados em LLM): mesmo modelo barato usado no DeepEval
 (amazon.nova-micro-v1:0), para manter os scores comparáveis entre as duas
@@ -21,6 +21,16 @@ então não sofre de instabilidade de juiz.
 
 Rodar depois de coletar um lote de interações reais do agente (trace_id de
 cada chamada feita durante o golden dataset / sessão exploratória).
+
+NOTA (22/09/2026): o deploy real deste projeto usa Harness, criado via
+console (ver planejamento.md secao 6), nao o Runtime puro do
+bedrock-agentcore-starter-toolkit. O console do Harness tem uma secao
+"Assess > Evaluations" no menu lateral, que pode ser o caminho real para
+rodar o AgentCore Evaluations (direto pelo console, sobre os traces das
+sessoes ja registradas), em vez do fluxo via SDK (`rodar_avaliacao` abaixo).
+Verificar essa secao do console antes de tentar rodar o SDK; os avaliadores
+e o avaliador customizado definidos abaixo continuam valendo como
+especificacao do que avaliar, independente do mecanismo de execucao.
 """
 
 import os
@@ -33,7 +43,7 @@ JUDGE_MODEL_ID = os.environ.get("JUDGE_MODEL_ID", "amazon.nova-micro-v1:0")
 # AgentCore Evaluations traz avaliadores prontos para: correção/utilidade da
 # resposta ("Helpfulness"/"Correctness"), aderência ao uso de ferramentas
 # ("Tool Use Accuracy"/groundedness na ferramenta) e outros. Escolhemos os
-# dois mais alinhados aos riscos do BiblioAtende (alucinação de acervo e uso
+# dois mais alinhados aos riscos do Guardião da Umbra (alucinação de acervo e uso
 # incorreto da ferramenta de RAG):
 
 AVALIADORES_INTEGRADOS = [
@@ -61,11 +71,11 @@ AVALIADORES_INTEGRADOS = [
 ]
 
 # ---------------------------------------------------------------------------
-# 2) Avaliador customizado (baseado em código) — regra específica do domínio
+# 2) Avaliador customizado (baseado em código), regra específica do domínio
 # ---------------------------------------------------------------------------
 # Regra: "o agente nunca confirma uma reserva/empréstimo como definitivamente
 # concluído". É uma regra objetiva o suficiente para checar por código
-# (regex/heurística), sem depender de um LLM — mais barato e determinístico.
+# (regex/heurística), sem depender de um LLM: mais barato e determinístico.
 
 PADROES_CONFIRMACAO_INDEVIDA = [
     "reserva confirmada",
@@ -107,7 +117,7 @@ def avaliador_customizado_sem_confirmacao_indevida(input_usuario: str, resposta_
 
     passou = (not contem_confirmacao_indevida) and (contem_registro_correto or True)
     # Nota: quando contem_confirmacao_indevida é True, falha sempre, mesmo
-    # que também haja linguagem de registro — a promessa indevida por si só
+    # que também haja linguagem de registro: a promessa indevida por si só
     # já é uma falha grave conforme planejamento.md.
     if contem_confirmacao_indevida:
         passou = False
@@ -141,7 +151,7 @@ def rodar_avaliacao(trace_ids: list[str]):
     from bedrock_agentcore_starter_toolkit import Evaluations
     ev = Evaluations(region=os.environ.get("AWS_REGION", "us-east-1"))
     resultado = ev.run(
-        agent_name="biblioatende",
+        agent_name="guardiao-umbra",
         trace_ids=trace_ids,
         evaluators=AVALIADORES_INTEGRADOS,
         custom_evaluators=[AVALIADOR_CUSTOMIZADO],
