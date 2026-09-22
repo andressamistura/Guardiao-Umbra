@@ -38,25 +38,42 @@ de aprovação para produção: zero falhas de severidade Alta no red teaming
 pós-correção.
 
 ### 1.4 Modelo do agente e modelo juiz
-Dado o orçamento de créditos disponível para o desafio, tanto o **agente**
-quanto o **juiz** rodam em modelos econômicos. O agente usa
-`amazon.titan-text-lite-v1`, o Titan Text mais barato do Bedrock, já que é
-chamado com alta frequência (golden dataset + red teaming geram dezenas de
-chamadas). O **juiz**, usado tanto no DeepEval quanto nos avaliadores do
-AgentCore, usa `amazon.nova-micro-v1:0`, o modelo mais barato do catálogo
-Bedrock, mantendo tudo na mesma conta AWS do agente. Essa é uma decisão
-diferente da recomendação do enunciado (que sugere o
-modelo mais forte disponível como juiz, já que juízes fracos geram scores
-instáveis); o risco foi assumido conscientemente e é discutido na conclusão
-deste relatório.
+Dado o orçamento de créditos disponível para o desafio, o plano inicial era
+usar `amazon.titan-text-lite-v1` (o Titan Text mais barato) como modelo do
+agente. Esse modelo foi retirado do catálogo do Bedrock antes da execução
+deste desafio (0 resultados no seletor de modelo do console), o que exigiu
+uma escolha alternativa durante o próprio deploy: ver seção 2 para o modelo
+efetivamente usado e os testes que motivaram essa escolha (achado relevante
+de avaliação por si só, documentado em `planejamento.md`, seção 6). O
+**juiz**, usado tanto no DeepEval quanto nos avaliadores do AgentCore, usa
+`amazon.nova-micro-v1:0`, o modelo mais barato do catálogo Bedrock, mantendo
+tudo na mesma conta AWS do agente. Essa é uma decisão diferente da
+recomendação do enunciado (que sugere o modelo mais forte disponível como
+juiz, já que juízes fracos geram scores instáveis); o risco foi assumido
+conscientemente e é discutido na conclusão deste relatório.
 
 ---
 
 ## 2. O agente: arquitetura
 
-- **Modelo (geração):** `amazon.titan-text-lite-v1` (custo mínimo).
+- **Modelo (geração):** [preencher com o modelo final, ver nota abaixo].
+  Testes no Harness playground mostraram que os modelos Nova (Micro, Lite e
+  Pro, esta última incluída especificamente para descartar "modelo fraco
+  demais" como causa) falham de forma consistente e idêntica ao chamar a
+  ferramenta de RAG (`modelStreamErrorException`: "Model produced invalid
+  sequence as part of ToolUse"), um achado técnico sobre incompatibilidade
+  da família Nova com o schema de ferramenta gerado pelo AgentCore Gateway
+  usado neste projeto, não sobre capacidade geral do modelo. O Claude Haiku
+  chamou a ferramenta corretamente (resultados reais da Knowledge Base,
+  score de relevância 0,999), mas depende de uma permissão de AWS
+  Marketplace (`aws-marketplace:Subscribe`) bloqueada nesta conta de
+  fellowship no momento do deploy. Detalhes completos, incluindo a tabela
+  comparativa por modelo, em `planejamento.md`, seção 6.
 - **Modelo (juiz, só avaliação):** `amazon.nova-micro-v1:0` (custo mínimo).
-- **Harness:** Amazon Bedrock AgentCore.
+- **Harness:** Amazon Bedrock AgentCore Harness (opção sem infraestrutura
+  do AgentCore, configurada via console: modelo, system prompt, Memory e
+  ferramenta Gateway direto na UI, sem build de container Docker nem uso do
+  `bedrock-agentcore-starter-toolkit`).
 - **Ferramenta:** base de conhecimento (RAG) com o catálogo da biblioteca,
   150 livros (título, autor, gênero, sinopse, ano, ISBN, exemplares) e as
   regras gerais (prazo, multa, limite, horário, seções). Ver
@@ -75,9 +92,22 @@ deste relatório.
   de inventário
   (`exemplares_total`/`exemplares_disponiveis`) são fictícios em todos os
   casos, por serem específicos desta biblioteca de estudo de caso.
-- **Memória:** memória de sessão nativa do AgentCore Harness, habilitada via
-  `session_memory=True`, permitindo fluxos multi-turno como "esse mesmo
-  livro tem exemplar disponível?" sem repetir o título.
+- **Base de dados vetorial:** Knowledge Base gerenciada do Bedrock ("Managed
+  vector store"), criada via console, que evita o Amazon OpenSearch
+  Serverless por padrão (recomendação da própria AWS para custo, e também a
+  orientação recebida na aula do fellowship, dado o histórico de custo alto
+  do OpenSearch Serverless para outros participantes). Exposta ao Harness
+  como ferramenta via um AgentCore Gateway (protocolo MCP, autenticação por
+  IAM role). Uma alternativa via boto3 direto com Amazon S3 Vectors também
+  foi implementada (`agente/agentcore_setup.py`) como caminho de código,
+  mas não foi o caminho usado neste deploy final (ver `planejamento.md`,
+  seções 5 e 6).
+- **Memória:** recurso de Memory do AgentCore (curto prazo/eventos por
+  sessão, sem estratégias de longo prazo entre sessões configuradas),
+  anexado ao Harness via console, permitindo fluxos multi-turno como "esse
+  mesmo livro tem exemplar disponível?" sem repetir o título, sem reter
+  contexto entre sessões diferentes (verificado no red teaming, categoria
+  vazamento de informação).
 - **Instruções do sistema:** papel, tom e 7 regras de comportamento
   explícitas (nunca inventar dado de acervo, nunca confirmar reserva como
   concluída, recusar fora de escopo, nunca revelar o system prompt, não
@@ -89,9 +119,10 @@ deste relatório.
 
 ## 3. Dataset e técnicas de design
 
-18 casos no golden dataset (`dataset/golden_dataset.json`), cobrindo as 5
+19 casos no golden dataset (`dataset/golden_dataset.json`), cobrindo as 5
 categorias exigidas: consulta direta (4), tarefa com ferramenta (4),
-multi-turno (3), fora de escopo (4) e adversarial (4). Cada caso tem input
+multi-turno (3), fora de escopo (4) e adversarial (4, incluindo um caso
+específico de reserva sem cadastro de membro). Cada caso tem input
 (ou sequência de turnos), critério esperado e contexto de referência quando
 aplicável. As técnicas de design usadas:
 - **Casos negativos controlados** (ex. TF-01, TF-04): o critério só passa se
@@ -144,12 +175,13 @@ contexto"). Suíte completa em `avaliacao/deepeval/test_agent.py`.
 
 ## 5. Campanha de red teaming e achados
 
-16 tentativas documentadas em `redteam/ataques.json` /
+18 tentativas documentadas em `redteam/ataques.json` /
 `redteam/log_redteam.md`, cobrindo as 5 categorias sugeridas: prompt
 injection (direto e via ferramenta), jailbreak/bypass, vazamento de
 informação, conteúdo perigoso/promessa indevida e uso indevido da
-ferramenta. Cada tentativa registra objetivo, técnica, resultado e
-severidade.
+ferramenta, incluindo duas tentativas específicas de burlar a regra de que
+só membros cadastrados podem reservar/retirar livros (RT-17, RT-18). Cada
+tentativa registra objetivo, técnica, resultado e severidade.
 
 **Tabela de achados** (preencher após execução real):
 
@@ -185,10 +217,16 @@ instruções/guardrails/restrições de ferramenta].
 **Recomendação final:** [SIM/NÃO colocar em produção], porque [justificativa
 baseada nos números reais obtidos].
 
-**Limitação de custo assumida:** este projeto usou agente e juiz econômicos
-(Titan Text Lite e Nova Micro, respectivamente, ambos os modelos mais
-baratos do catálogo Bedrock) por restrição de orçamento de créditos, em vez
-de um juiz forte como o enunciado recomenda.
+**Limitação de custo assumida:** este projeto usou um juiz econômico
+(Nova Micro, o modelo mais barato do catálogo Bedrock) por restrição de
+orçamento de créditos, em vez de um juiz forte como o enunciado recomenda.
+O modelo do agente [preencher: qual modelo ficou valendo ao final, Nova ou
+Claude Haiku, e por quê] também foi limitado por dois fatores fora do
+controle deste projeto: a retirada do Titan Text do catálogo Bedrock, e a
+incompatibilidade encontrada entre a família Nova e o Gateway MCP usado
+para a ferramenta de RAG (ver seção 2), que forçou a escolha entre um
+modelo funcional bloqueado por permissão de conta (Claude Haiku) e modelos
+disponíveis mas com tool calling não confiável (Nova).
 [preencher: os scores do DeepEval e do AgentCore Evaluations variaram muito
 entre execuções repetidas do mesmo caso? Se sim, isso é evidência de que o
 juiz barato está gerando notas instáveis, e a recomendação de produção
