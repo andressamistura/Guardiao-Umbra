@@ -149,8 +149,16 @@ def _executar_caso(agente: AgentClient, caso: dict) -> LLMTestCase:
     return LLMTestCase(
         input=input_avaliado,
         actual_output=saida,
+        # retrieval_context fica None quando não há contexto de referência
+        # (só é usado por Answer Relevancy/Faithfulness, que já pulam esses
+        # casos via CASOS_COM_CONTEXTO). context precisa ser uma lista (nunca
+        # None) porque o GEval de conformidade roda em TODOS os casos,
+        # inclusive os sem contexto de referência (fora_de_escopo,
+        # adversarial); uma lista vazia satisfaz esse requisito sem afetar
+        # a avaliação (os passos 3/4 do checklist simplesmente não encontram
+        # contradição a checar).
         retrieval_context=contexto or None,
-        context=contexto or None,
+        context=contexto,
     )
 
 
