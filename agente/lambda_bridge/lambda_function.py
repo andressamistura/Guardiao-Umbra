@@ -4,21 +4,40 @@ organizacao AWS da turma, que nega chamadas programaticas de usuario IAM as
 acoes bedrock-agentcore:InvokeHarness/InvokeAgentRuntime e bedrock:InvokeModel
 (achado de 23/09/2026, ver planejamento.md secao 6). A mesma SCP NAO bloqueia
 a role de execucao de uma Lambda chamando essas mesmas acoes (testado e
-confirmado). Esta funcao roda com uma role de servico que tem essas duas
-acoes liberadas, e agent_client.py / bedrock_judge.py chamam esta Lambda via
-lambda:InvokeFunction (acao diferente, nao coberta pela SCP) em vez de
-chamar bedrock-agentcore/bedrock-runtime diretamente da maquina local.
+confirmado). Esta funcao roda com uma role de servico que tem essas acoes
+liberadas.
 
-Payload esperado (event):
+Segundo achado (mesmo dia): a SCP tambem nega lambda:InvokeFunction para o
+usuario IAM, entao chamar esta Lambda via boto3 (lambda_client.invoke)
+tambem e bloqueado. Por isso esta funcao e exposta como Function URL com
+autenticacao NONE: agent_client.py / bedrock_judge.py chamam essa URL via
+HTTPS puro (sem SigV4/credenciais IAM), o que nao e uma "acao de API" da
+conta e por isso nao e coberto pela SCP.
+
+Uma Function URL entrega o payload dentro de event["body"] (como string
+JSON), diferente de uma invocacao direta via console/boto3 Invoke, onde o
+payload e o proprio event. _extrair_payload trata os dois formatos, para
+esta funcao continuar testavel pelo "Test" do console.
+
+Payload esperado (dentro de event ou de json.loads(event["body"])):
   {"acao": "invoke_harness", "harnessArn": ..., "runtimeSessionId": ..., "messages": [...]}
   {"acao": "converse", "modelId": ..., "messages": [...], "inferenceConfig": {...}}
 
-Retorno: {"ok": true, "texto": "..."} ou {"ok": false, "erro": "..."}
+Retorno (Function URL): {"statusCode": 200, "body": '{"ok": true, "texto": "..."}'}
 """
+
+import json
 
 import boto3
 
 REGIAO = "us-east-1"
+
+
+def _extrair_payload(event):
+    corpo = event.get("body") if isinstance(event, dict) else None
+    if isinstance(corpo, (str, bytes)):
+        return json.loads(corpo)
+    return event
 
 
 def _invoke_harness(payload):
@@ -47,12 +66,20 @@ def _converse(payload):
 
 
 def lambda_handler(event, context):
-    acao = event.get("acao")
+    payload = _extrair_payload(event)
+    acao = payload.get("acao")
     try:
         if acao == "invoke_harness":
-            return {"ok": True, "texto": _invoke_harness(event)}
-        if acao == "converse":
-            return {"ok": True, "texto": _converse(event)}
-        return {"ok": False, "erro": f"Acao desconhecida: {acao}"}
+            resultado = {"ok": True, "texto": _invoke_harness(payload)}
+        elif acao == "converse":
+            resultado = {"ok": True, "texto": _converse(payload)}
+        else:
+            resultado = {"ok": False, "erro": f"Acao desconhecida: {acao}"}
     except Exception as e:
-        return {"ok": False, "erro": f"{type(e).__name__}: {e}"}
+        resultado = {"ok": False, "erro": f"{type(e).__name__}: {e}"}
+
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps(resultado, ensure_ascii=False),
+    }

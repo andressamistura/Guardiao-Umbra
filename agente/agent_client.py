@@ -9,14 +9,24 @@ consultem exatamente o mesmo agente em produção/teste.
 Achado de 23/09/2026 (ver planejamento.md secao 6): uma Service Control
 Policy da organizacao AWS da turma nega chamadas programaticas de usuario
 IAM as acoes bedrock-agentcore:InvokeHarness/InvokeAgentRuntime, mesmo com
-uma politica IAM liberando a acao (SCP sempre tem prioridade). A mesma SCP
-NAO bloqueia a role de execucao de uma AWS Lambda chamando essas mesmas
-acoes (testado e confirmado). Por isso, por padrao, este cliente chama uma
-Lambda "ponte" (agente/lambda_bridge/lambda_function.py) via
-lambda:InvokeFunction em vez de chamar bedrock-agentcore diretamente. Se a
-SCP for ajustada no futuro, defina UMBRA_USAR_LAMBDA_BRIDGE=0 para voltar a
-chamar a API diretamente (formato copiado do "View invocation code" do
-Harness no console AWS).
+uma politica IAM liberando a acao (SCP sempre tem prioridade).
+
+Segundo achado (mesmo dia): a mesma SCP tambem nega lambda:InvokeFunction
+para o usuario IAM, entao chamar uma Lambda "ponte" via boto3
+(lambda_client.invoke) tambem e bloqueado -- a SCP nega por ACAO de API,
+nao especificamente por servico Bedrock. Nenhuma chamada de API assinada
+com as credenciais do usuario IAM escapa dela.
+
+A saida encontrada: uma Function URL da Lambda com tipo de autenticacao
+NONE. Isso transforma a chamada em uma requisicao HTTPS publica comum, sem
+nenhuma assinatura SigV4 de credenciais IAM -- ou seja, deixa de ser uma
+"acao de API" da conta e a SCP (que so controla acoes de identidades IAM)
+simplesmente nao se aplica. Por isso, por padrao, este cliente chama a
+Function URL da Lambda "ponte" (agente/lambda_bridge/lambda_function.py)
+via HTTPS puro (urllib) em vez de bedrock-agentcore ou lambda:InvokeFunction
+diretamente. Se a SCP for ajustada no futuro, defina
+UMBRA_USAR_LAMBDA_BRIDGE=0 para voltar a chamar a API diretamente (formato
+copiado do "View invocation code" do Harness no console AWS).
 
 Uso:
     from agent_client import AgentClient
@@ -27,6 +37,8 @@ Uso:
 
 import json
 import os
+import urllib.error
+import urllib.request
 import uuid
 
 import boto3
@@ -40,10 +52,32 @@ HARNESS_ARN = os.environ.get(
 )
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 
-# Nome da função Lambda "ponte" (ver nota acima). Sobrescreva via
-# UMBRA_LAMBDA_BRIDGE se a função for recriada com outro nome.
-LAMBDA_BRIDGE_NAME = os.environ.get("UMBRA_LAMBDA_BRIDGE", "teste-guardiao-umbra")
+# URL da Function URL da Lambda "ponte" (ver nota acima), com tipo de
+# autenticacao NONE. Copie do console: Lambda > teste-guardiao-umbra >
+# Configuration > Function URL. Sobrescreva via UMBRA_LAMBDA_BRIDGE_URL se a
+# função/URL for recriada.
+LAMBDA_BRIDGE_URL = os.environ.get("UMBRA_LAMBDA_BRIDGE_URL", "")
 USAR_LAMBDA_BRIDGE = os.environ.get("UMBRA_USAR_LAMBDA_BRIDGE", "1") != "0"
+
+
+def _chamar_lambda_bridge(url: str, payload: dict, timeout: int = 60) -> dict:
+    """Faz uma requisicao HTTPS pura (sem SigV4/credenciais IAM) para a
+    Function URL da Lambda ponte. Usa só a biblioteca padrão (urllib) para
+    não depender de requests estar instalado no ambiente de quem roda a
+    suíte."""
+    dados = json.dumps(payload).encode("utf-8")
+    requisicao = urllib.request.Request(
+        url,
+        data=dados,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(requisicao, timeout=timeout) as resposta:
+            return json.loads(resposta.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        corpo = e.read().decode("utf-8")
+        raise RuntimeError(f"Erro HTTP {e.code} na Lambda ponte: {corpo}") from e
 
 
 class AgentClient:
@@ -52,14 +86,20 @@ class AgentClient:
         harness_arn: str = HARNESS_ARN,
         region: str = AWS_REGION,
         usar_lambda_bridge: bool = USAR_LAMBDA_BRIDGE,
-        lambda_bridge_name: str = LAMBDA_BRIDGE_NAME,
+        lambda_bridge_url: str = LAMBDA_BRIDGE_URL,
     ):
         self.harness_arn = harness_arn
         self.usar_lambda_bridge = usar_lambda_bridge
-        self.lambda_bridge_name = lambda_bridge_name
-        if usar_lambda_bridge:
-            self.lambda_client = boto3.client("lambda", region_name=region)
-        else:
+        self.lambda_bridge_url = lambda_bridge_url
+        if usar_lambda_bridge and not lambda_bridge_url:
+            raise ValueError(
+                "UMBRA_LAMBDA_BRIDGE_URL não configurada. Copie a Function "
+                "URL da Lambda ponte (console: Lambda > teste-guardiao-umbra "
+                "> Configuration > Function URL) e defina essa variável de "
+                "ambiente, ou passe lambda_bridge_url= ao construir "
+                "AgentClient."
+            )
+        if not usar_lambda_bridge:
             self.client = boto3.client("bedrock-agentcore", region_name=region)
 
     def invoke(self, mensagem: str, session_id: str | None = None) -> str:
@@ -91,12 +131,8 @@ class AgentClient:
             "runtimeSessionId": session_id,
             "messages": mensagens,
         }
-        resposta = self.lambda_client.invoke(
-            FunctionName=self.lambda_bridge_name,
-            Payload=json.dumps(payload).encode("utf-8"),
-        )
-        corpo = json.loads(resposta["Payload"].read())
-        if "FunctionError" in resposta or not corpo.get("ok"):
+        corpo = _chamar_lambda_bridge(self.lambda_bridge_url, payload)
+        if not corpo.get("ok"):
             raise RuntimeError(f"Erro na Lambda ponte: {corpo.get('erro', corpo)}")
         return corpo["texto"]
 

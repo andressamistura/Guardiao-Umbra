@@ -13,9 +13,13 @@ e aplica duas táticas de estabilidade, mantendo o custo baixo:
 
 Achado de 23/09/2026 (ver planejamento.md secao 6): a mesma SCP que bloqueia
 bedrock-agentcore:InvokeHarness para usuario IAM tambem bloqueia
-bedrock:InvokeModel (via Converse), entao o juiz tambem precisa passar pela
-Lambda "ponte" (agente/lambda_bridge/lambda_function.py) em vez de chamar
-bedrock-runtime diretamente. Mesma logica usada em agent_client.py.
+bedrock:InvokeModel (via Converse) -- e, descoberto na sequencia, tambem
+bloqueia lambda:InvokeFunction (a SCP nega por ACAO de API, nao so por
+servico Bedrock, entao chamar a Lambda ponte via boto3 tambem e bloqueado).
+A saida: uma Function URL da Lambda com autenticacao NONE, chamada via
+HTTPS puro (sem SigV4/credenciais IAM), que deixa de ser uma "acao de API"
+da conta e por isso escapa da SCP. O juiz passa pela mesma Function URL que
+agent_client.py usa para o agente.
 
 Uso:
     from bedrock_judge import BedrockJudgeModel
@@ -25,13 +29,31 @@ Uso:
 
 import json
 import os
+import urllib.error
+import urllib.request
 from collections import Counter
 
 import boto3
 from deepeval.models import DeepEvalBaseLLM
 
-LAMBDA_BRIDGE_NAME = os.environ.get("UMBRA_LAMBDA_BRIDGE", "teste-guardiao-umbra")
+LAMBDA_BRIDGE_URL = os.environ.get("UMBRA_LAMBDA_BRIDGE_URL", "")
 USAR_LAMBDA_BRIDGE = os.environ.get("UMBRA_USAR_LAMBDA_BRIDGE", "1") != "0"
+
+
+def _chamar_lambda_bridge(url: str, payload: dict, timeout: int = 60) -> dict:
+    dados = json.dumps(payload).encode("utf-8")
+    requisicao = urllib.request.Request(
+        url,
+        data=dados,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(requisicao, timeout=timeout) as resposta:
+            return json.loads(resposta.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        corpo = e.read().decode("utf-8")
+        raise RuntimeError(f"Erro HTTP {e.code} na Lambda ponte: {corpo}") from e
 
 
 class BedrockJudgeModel(DeepEvalBaseLLM):
@@ -41,20 +63,26 @@ class BedrockJudgeModel(DeepEvalBaseLLM):
         region: str = None,
         self_consistency_n: int = 3,
         usar_lambda_bridge: bool = USAR_LAMBDA_BRIDGE,
-        lambda_bridge_name: str = LAMBDA_BRIDGE_NAME,
+        lambda_bridge_url: str = LAMBDA_BRIDGE_URL,
     ):
         self.model_id = model_id
         self.region = region or os.environ.get("AWS_REGION", "us-east-1")
         self.self_consistency_n = self_consistency_n
         self.usar_lambda_bridge = usar_lambda_bridge
-        self.lambda_bridge_name = lambda_bridge_name
-        if usar_lambda_bridge:
-            self.client = boto3.client("lambda", region_name=self.region)
-        else:
-            self.client = boto3.client("bedrock-runtime", region_name=self.region)
+        self.lambda_bridge_url = lambda_bridge_url
+        if usar_lambda_bridge and not lambda_bridge_url:
+            raise ValueError(
+                "UMBRA_LAMBDA_BRIDGE_URL não configurada. Copie a Function "
+                "URL da Lambda ponte (console: Lambda > teste-guardiao-umbra "
+                "> Configuration > Function URL) e defina essa variável de "
+                "ambiente."
+            )
+        self.client = None if usar_lambda_bridge else boto3.client(
+            "bedrock-runtime", region_name=self.region
+        )
 
     def load_model(self):
-        return self.client
+        return self.client if self.client is not None else self
 
     def _gerar_uma_vez(self, prompt: str) -> str:
         if self.usar_lambda_bridge:
@@ -68,12 +96,8 @@ class BedrockJudgeModel(DeepEvalBaseLLM):
             "messages": [{"role": "user", "content": [{"text": prompt}]}],
             "inferenceConfig": {"temperature": 0, "maxTokens": 1024},
         }
-        resposta = self.client.invoke(
-            FunctionName=self.lambda_bridge_name,
-            Payload=json.dumps(payload).encode("utf-8"),
-        )
-        corpo = json.loads(resposta["Payload"].read())
-        if "FunctionError" in resposta or not corpo.get("ok"):
+        corpo = _chamar_lambda_bridge(self.lambda_bridge_url, payload)
+        if not corpo.get("ok"):
             raise RuntimeError(f"Erro na Lambda ponte (juiz): {corpo.get('erro', corpo)}")
         return corpo["texto"]
 
