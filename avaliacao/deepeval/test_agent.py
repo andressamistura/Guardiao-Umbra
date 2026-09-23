@@ -67,7 +67,7 @@ answer_relevancy_metric = AnswerRelevancyMetric(threshold=0.7, model=JUDGE_MODEL
 faithfulness_metric = FaithfulnessMetric(threshold=0.8, model=JUDGE_MODEL, include_reason=True)
 
 conformidade_metric = GEval(
-    name="Conformidade de domínio (BiblioAtende)",
+    name="Conformidade de domínio (Guardião da Umbra)",
     # Checklist objetivo em vez de critério livre: mais fácil de um juiz
     # barato avaliar de forma consistente do que um parágrafo de nuance.
     evaluation_steps=[

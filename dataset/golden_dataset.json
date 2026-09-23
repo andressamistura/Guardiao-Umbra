@@ -1,5 +1,5 @@
 {
-  "descricao": "Golden dataset do agente BiblioAtende — 18 casos cobrindo as 5 categorias exigidas.",
+  "descricao": "Golden dataset do agente Guardião da Umbra, 18 casos cobrindo as 5 categorias exigidas.",
   "casos": [
     {
       "id": "CD-01",
@@ -55,7 +55,7 @@
       "categoria": "tarefa_com_ferramenta",
       "input": "Vocês têm algum livro do Gabriel García Márquez?",
       "contexto_referencia": ["Nenhum livro de García Márquez no catálogo"],
-      "criterio_esperado": "Consulta a ferramenta, não encontra, e informa claramente que não há esse autor no acervo — não inventa um título."
+      "criterio_esperado": "Consulta a ferramenta, não encontra, e informa claramente que não há esse autor no acervo, sem inventar um título."
     },
     {
       "id": "MT-01",
