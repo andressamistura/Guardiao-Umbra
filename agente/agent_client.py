@@ -6,11 +6,17 @@ planejamento.md secao 6). Usado por: sessão exploratória, dataset (geração
 de respostas), suíte DeepEval e campanha de red teaming, para que todos
 consultem exatamente o mesmo agente em produção/teste.
 
-O formato de chamada abaixo (client.invoke_harness, resposta em streaming
-via response['stream'] com eventos 'contentBlockDelta') foi copiado
-diretamente do "View invocation code" da página de detalhes do Harness no
-console AWS (Amazon Bedrock AgentCore > Harness > guardiao_umbra_harness),
-não é um formato genérico assumido.
+Achado de 23/09/2026 (ver planejamento.md secao 6): uma Service Control
+Policy da organizacao AWS da turma nega chamadas programaticas de usuario
+IAM as acoes bedrock-agentcore:InvokeHarness/InvokeAgentRuntime, mesmo com
+uma politica IAM liberando a acao (SCP sempre tem prioridade). A mesma SCP
+NAO bloqueia a role de execucao de uma AWS Lambda chamando essas mesmas
+acoes (testado e confirmado). Por isso, por padrao, este cliente chama uma
+Lambda "ponte" (agente/lambda_bridge/lambda_function.py) via
+lambda:InvokeFunction em vez de chamar bedrock-agentcore diretamente. Se a
+SCP for ajustada no futuro, defina UMBRA_USAR_LAMBDA_BRIDGE=0 para voltar a
+chamar a API diretamente (formato copiado do "View invocation code" do
+Harness no console AWS).
 
 Uso:
     from agent_client import AgentClient
@@ -19,6 +25,7 @@ Uso:
     resposta2 = client.invoke("Tem exemplar disponível?", session_id="teste-1")
 """
 
+import json
 import os
 import uuid
 
@@ -33,11 +40,27 @@ HARNESS_ARN = os.environ.get(
 )
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 
+# Nome da função Lambda "ponte" (ver nota acima). Sobrescreva via
+# UMBRA_LAMBDA_BRIDGE se a função for recriada com outro nome.
+LAMBDA_BRIDGE_NAME = os.environ.get("UMBRA_LAMBDA_BRIDGE", "teste-guardiao-umbra")
+USAR_LAMBDA_BRIDGE = os.environ.get("UMBRA_USAR_LAMBDA_BRIDGE", "1") != "0"
+
 
 class AgentClient:
-    def __init__(self, harness_arn: str = HARNESS_ARN, region: str = AWS_REGION):
+    def __init__(
+        self,
+        harness_arn: str = HARNESS_ARN,
+        region: str = AWS_REGION,
+        usar_lambda_bridge: bool = USAR_LAMBDA_BRIDGE,
+        lambda_bridge_name: str = LAMBDA_BRIDGE_NAME,
+    ):
         self.harness_arn = harness_arn
-        self.client = boto3.client("bedrock-agentcore", region_name=region)
+        self.usar_lambda_bridge = usar_lambda_bridge
+        self.lambda_bridge_name = lambda_bridge_name
+        if usar_lambda_bridge:
+            self.lambda_client = boto3.client("lambda", region_name=region)
+        else:
+            self.client = boto3.client("bedrock-agentcore", region_name=region)
 
     def invoke(self, mensagem: str, session_id: str | None = None) -> str:
         """Envia uma mensagem ao agente, mantendo memória de sessão quando
@@ -55,21 +78,39 @@ class AgentClient:
         ainda precisa ser decidido/implementado antes do passo 3 do README.
         """
         session_id = session_id or str(uuid.uuid4())
+        mensagens = [{"role": "user", "content": [{"text": mensagem}]}]
 
+        if self.usar_lambda_bridge:
+            return self._invoke_via_lambda(session_id, mensagens)
+        return self._invoke_direto(session_id, mensagens)
+
+    def _invoke_via_lambda(self, session_id: str, mensagens: list) -> str:
+        payload = {
+            "acao": "invoke_harness",
+            "harnessArn": self.harness_arn,
+            "runtimeSessionId": session_id,
+            "messages": mensagens,
+        }
+        resposta = self.lambda_client.invoke(
+            FunctionName=self.lambda_bridge_name,
+            Payload=json.dumps(payload).encode("utf-8"),
+        )
+        corpo = json.loads(resposta["Payload"].read())
+        if "FunctionError" in resposta or not corpo.get("ok"):
+            raise RuntimeError(f"Erro na Lambda ponte: {corpo.get('erro', corpo)}")
+        return corpo["texto"]
+
+    def _invoke_direto(self, session_id: str, mensagens: list) -> str:
         resposta = self.client.invoke_harness(
             harnessArn=self.harness_arn,
             runtimeSessionId=session_id,
-            messages=[
-                {"role": "user", "content": [{"text": mensagem}]},
-            ],
+            messages=mensagens,
         )
-
         texto_completo = []
         for evento in resposta["stream"]:
             delta = evento.get("contentBlockDelta", {}).get("delta", {})
             if "text" in delta:
                 texto_completo.append(delta["text"])
-
         return "".join(texto_completo)
 
 
