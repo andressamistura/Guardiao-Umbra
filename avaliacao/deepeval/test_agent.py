@@ -27,6 +27,7 @@ Mitigação de instabilidade (sem trocar de modelo, ver bedrock_judge.py):
 
 import json
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -100,7 +101,10 @@ conformidade_metric = GEval(
 
 def _executar_caso(agente: AgentClient, caso: dict) -> LLMTestCase:
     entrada = caso["input"]
-    session_id = f"deepeval-{caso['id']}"
+    # runtimeSessionId do Harness exige comprimento mínimo de 33 caracteres;
+    # um uuid determinístico a partir do id do caso garante isso e mantém a
+    # mesma sessão entre os turnos de um mesmo caso multi-turno.
+    session_id = f"deepeval-{uuid.uuid5(uuid.NAMESPACE_DNS, caso['id'])}"
 
     if isinstance(entrada, list):
         # multi-turno: só a última resposta é avaliada, mas todos os turnos
