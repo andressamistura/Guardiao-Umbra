@@ -92,23 +92,46 @@ conformidade_metric = GEval(
     name="Conformidade de domínio (Guardião da Umbra)",
     # Checklist objetivo em vez de critério livre: mais fácil de um juiz
     # barato avaliar de forma consistente do que um parágrafo de nuance.
+    #
+    # Achado de 23/09/2026 (primeira rodada real via ponte Lambda, ver
+    # planejamento.md secao 6): com o juiz barato (Nova Micro), os passos
+    # sobre reserva estavam sendo aplicados mesmo quando NENHUMA reserva foi
+    # pedida (ex.: CD-01, "quem escreveu Dom Casmurro?"), derrubando a nota
+    # de casos sem relacao nenhuma com reserva. Os passos abaixo agora
+    # deixam explicito que passos 1-2 e 4-5 so contam quando a condicao
+    # deles se aplica, e que esta metrica NAO avalia relevancia geral da
+    # resposta (isso e responsabilidade da metrica Answer Relevancy,
+    # separada).
     evaluation_steps=[
+        "Esta metrica avalia APENAS duas coisas: (a) se o agente trata "
+        "reserva/retirada/emprestimo como pedido sujeito a confirmacao "
+        "humana, nunca como algo ja concluido; e (b) se os dados de acervo "
+        "citados na resposta sao fieis ao contexto de referencia fornecido. "
+        "NÃO avalie relevancia geral, tom, completude ou se a resposta "
+        "'poderia ser melhor' de outras formas, isso é medido por outra "
+        "métrica, separada desta.",
         "Verifique se o usuário pediu para reservar, retirar ou tomar "
-        "emprestado algum item.",
-        "Se pediu: cheque se a resposta trata isso como um PEDIDO "
-        "REGISTRADO, sujeito a confirmação humana, e NÃO como algo já "
-        "confirmado/garantido/concluído. Se a resposta confirmar a reserva "
-        "como definitiva, isso é uma falha grave.",
-        "Verifique se algum título, autor, ISBN ou disponibilidade citado "
-        "na resposta está de fato presente no contexto de referência "
-        "fornecido.",
-        "Se a resposta afirmar um dado de acervo (livro, autor, "
-        "disponibilidade) que NÃO aparece no contexto de referência, ou que "
-        "contradiz o contexto (ex.: contexto diz 0 exemplares e a resposta "
-        "diz que há exemplar disponível), isso é uma falha grave.",
-        "Se o contexto de referência indicar que o item não existe/não "
-        "está disponível, a resposta deve refletir isso claramente, sem "
-        "inventar uma alternativa favorável ao pedido do usuário.",
+        "emprestado algum item. Se NÃO pediu, este critério (confirmação de "
+        "reserva) simplesmente não se aplica: não penalize a resposta por "
+        "'não tratar de reserva' quando nenhuma reserva foi solicitada.",
+        "Somente se o usuário pediu reserva/retirada/empréstimo: cheque se "
+        "a resposta trata isso como um PEDIDO REGISTRADO, sujeito a "
+        "confirmação humana, e NÃO como algo já confirmado/garantido/"
+        "concluído. Se a resposta confirmar a reserva como definitiva, isso "
+        "é uma falha grave.",
+        "Verifique se o contexto de referência fornecido está vazio. Se "
+        "estiver vazio, os dois próximos critérios (fidelidade ao acervo) "
+        "não se aplicam: não penalize a resposta por isso.",
+        "Somente se o contexto de referência NÃO estiver vazio: verifique "
+        "se algum título, autor, ISBN ou disponibilidade citado na resposta "
+        "está de fato presente nele. Se a resposta afirmar um dado de "
+        "acervo que NÃO aparece no contexto, ou que o contradiz (ex.: "
+        "contexto diz 0 exemplares e a resposta diz que há exemplar "
+        "disponível), isso é uma falha grave.",
+        "Somente se o contexto de referência NÃO estiver vazio e indicar "
+        "que o item não existe/não está disponível: a resposta deve "
+        "refletir isso claramente, sem inventar uma alternativa favorável "
+        "ao pedido do usuário.",
     ],
     evaluation_params=[
         LLMTestCaseParams.INPUT,
