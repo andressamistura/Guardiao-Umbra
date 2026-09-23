@@ -50,13 +50,34 @@ JUDGE_MODEL_ROBUSTO = BedrockJudgeModel(model_id="amazon.nova-micro-v1:0", self_
 
 DATASET_PATH = Path(__file__).resolve().parents[2] / "dataset" / "golden_dataset.json"
 
+# Fallback para quando a chamada programática ao Harness (invoke_harness)
+# está bloqueada por uma Service Control Policy da organização AWS da turma
+# (achado de 23/09/2026: deny explícito em nível de Organizations, que
+# nenhuma política anexada ao usuário IAM consegue sobrepor). Se este
+# arquivo existir e tiver uma resposta não vazia para o id do caso, ela é
+# usada no lugar de uma chamada ao vivo ao agente. As respostas devem ser
+# coletadas manualmente no playground do Harness no console AWS (mesmo
+# processo da sessão exploratória), rodando todos os turnos do caso na
+# mesma sessão e registrando só a resposta final. Ver
+# dataset/respostas_agente.json (gerado por
+# avaliacao/deepeval/gerar_template_respostas.py).
+RESPOSTAS_GRAVADAS_PATH = Path(__file__).resolve().parents[2] / "dataset" / "respostas_agente.json"
+
 
 def carregar_casos():
     dados = json.loads(DATASET_PATH.read_text(encoding="utf-8"))
     return dados["casos"]
 
 
+def carregar_respostas_gravadas() -> dict:
+    if not RESPOSTAS_GRAVADAS_PATH.exists():
+        return {}
+    dados = json.loads(RESPOSTAS_GRAVADAS_PATH.read_text(encoding="utf-8"))
+    return {k: v for k, v in dados.items() if v}
+
+
 CASOS = carregar_casos()
+RESPOSTAS_GRAVADAS = carregar_respostas_gravadas()
 # Métricas de resposta/RAG (Answer Relevancy e Faithfulness) fazem mais
 # sentido para consulta_direta, tarefa_com_ferramenta e multi_turno, onde
 # há contexto de referência real recuperável. Casos fora_de_escopo e
@@ -101,22 +122,27 @@ conformidade_metric = GEval(
 
 def _executar_caso(agente: AgentClient, caso: dict) -> LLMTestCase:
     entrada = caso["input"]
-    # runtimeSessionId do Harness exige comprimento mínimo de 33 caracteres;
-    # um uuid determinístico a partir do id do caso garante isso e mantém a
-    # mesma sessão entre os turnos de um mesmo caso multi-turno.
-    session_id = f"deepeval-{uuid.uuid5(uuid.NAMESPACE_DNS, caso['id'])}"
+    input_avaliado = " | ".join(entrada) if isinstance(entrada, list) else entrada
 
-    if isinstance(entrada, list):
-        # multi-turno: só a última resposta é avaliada, mas todos os turnos
-        # anteriores são enviados na mesma sessão para construir o contexto.
-        for turno in entrada[:-1]:
-            agente.invoke(turno, session_id=session_id)
-        pergunta_final = entrada[-1]
-        saida = agente.invoke(pergunta_final, session_id=session_id)
-        input_avaliado = " | ".join(entrada)
+    if caso["id"] in RESPOSTAS_GRAVADAS:
+        # Resposta coletada manualmente no playground do console (ver nota
+        # em RESPOSTAS_GRAVADAS_PATH acima); pula a chamada ao vivo.
+        saida = RESPOSTAS_GRAVADAS[caso["id"]]
     else:
-        saida = agente.invoke(entrada, session_id=session_id)
-        input_avaliado = entrada
+        # runtimeSessionId do Harness exige comprimento mínimo de 33
+        # caracteres; um uuid determinístico a partir do id do caso garante
+        # isso e mantém a mesma sessão entre os turnos de um mesmo caso
+        # multi-turno.
+        session_id = f"deepeval-{uuid.uuid5(uuid.NAMESPACE_DNS, caso['id'])}"
+        if isinstance(entrada, list):
+            # multi-turno: só a última resposta é avaliada, mas todos os
+            # turnos anteriores são enviados na mesma sessão para construir
+            # o contexto.
+            for turno in entrada[:-1]:
+                agente.invoke(turno, session_id=session_id)
+            saida = agente.invoke(entrada[-1], session_id=session_id)
+        else:
+            saida = agente.invoke(entrada, session_id=session_id)
 
     contexto = caso.get("contexto_referencia") or []
 
