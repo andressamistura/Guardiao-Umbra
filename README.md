@@ -18,7 +18,7 @@ agente/
 exploratoria/
   sessao_exploratoria.md               # charter + log da sessão exploratória (60-90min)
 dataset/
-  golden_dataset.json                  # 18 casos, 5 categorias
+  golden_dataset.json                  # 19 casos, 5 categorias
 avaliacao/
   deepeval/
     test_agent.py                      # suíte pytest/deepeval (3 métricas)
@@ -27,7 +27,7 @@ avaliacao/
   agentcore/
     evaluators_config.py               # 2 avaliadores integrados + 1 customizado
 redteam/
-  ataques.json                         # 16 tentativas, 5 categorias
+  ataques.json                         # 18 tentativas, 5 categorias
   log_redteam.md                       # tabela de resultados + achados
 analise_correcao/
   baseline_vs_final.md                 # comparação antes/depois da correção
@@ -39,50 +39,42 @@ relatorio/
 
 ### 0) Pré-requisitos
 ```bash
-pip install boto3 bedrock-agentcore bedrock-agentcore-starter-toolkit \
-            deepeval pytest --break-system-packages
+pip install boto3 deepeval pytest --break-system-packages
 aws configure   # ou variáveis AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION
 ```
-Garanta acesso liberado, no Bedrock, aos modelos usados (ambos escolhidos
-pelo custo, dado o orçamento de créditos disponível):
-- Agente: `amazon.titan-text-lite-v1` (o Titan Text mais barato)
-- Juiz: `amazon.nova-micro-v1:0` (o modelo mais barato do catálogo Bedrock,
-  na mesma conta AWS do agente)
-
-Atenção: o Titan Text Lite tem suporte mais fraco a tool calling do que
-Nova ou Claude. Teste a ferramenta de RAG logo no passo 1. Se o AgentCore
-Harness não conseguir orquestrar a chamada de ferramenta de forma estável,
-troque para `amazon.titan-text-premier-v1:0` (ainda barato, com melhor
-suporte a tool calling) em `agente/agentcore_setup.py`.
+Modelos usados, ambos na mesma conta AWS:
+- Agente: `Qwen3-Coder-30B-A3B-Instruct` (via Bedrock). Nova (Micro/Lite/Pro)
+  falha ao chamar a ferramenta de RAG deste Gateway, e os modelos Anthropic
+  ficam bloqueados por uma restrição de permissão de marketplace válida
+  para toda a turma; ver planejamento.md, seção 6, para o histórico
+  completo dos testes que levaram a essa escolha.
+- Juiz: `amazon.nova-micro-v1:0` (o modelo mais barato do catálogo Bedrock;
+  esse problema do Nova é específico de atuar como agente chamando esta
+  ferramenta, não afeta seu uso como juiz de texto, que não invoca
+  ferramentas).
 
 ### 1) Subir o agente
-```bash
-export S3_BUCKET_KB=<seu-bucket-de-documentos>       # bucket S3 comum (fonte de dados)
-export S3_VECTOR_BUCKET=<nome-do-bucket-vetorial>    # bucket S3 Vectors (embeddings)
-export S3_VECTOR_INDEX=<nome-do-indice-vetorial>
-# Se seu usuário não tiver permissão de IAM (comum em contas de sandbox),
-# peça ao administrador um role pronto para a Knowledge Base (ver
-# planejamento.md, seção 5) e informe o ARN aqui em vez de deixar o script
-# tentar criar um novo role:
-# export BEDROCK_KB_ROLE_ARN=<arn-do-role>
-python agente/agentcore_setup.py
-```
-A Knowledge Base usa **Amazon S3 Vectors** como armazenamento vetorial (não
-OpenSearch Serverless) para caber no orçamento de créditos disponível. Ver
-planejamento.md, seção 5, para o porquê.
+O deploy real deste projeto foi feito pelo console AWS (Harness + Gateway
+MCP + Knowledge Base gerenciada), não pelo script `agentcore_setup.py`
+(mantido no repositório como referência/alternativa via SDK). Ver
+planejamento.md, seção 6, para o passo a passo do deploy via console.
 
-Copie o ARN do endpoint retornado para a variável `UMBRA_AGENT_ARN`
-(usada por `agente/agent_client.py`).
+A Knowledge Base usa uma **Managed Knowledge Base** do Bedrock (não
+OpenSearch Serverless) para evitar risco de custo com capacidade reservada
+ociosa. Ver planejamento.md, seção 5.
+
+O ARN do Harness publicado já está configurado como padrão em
+`agente/agent_client.py` (variável `UMBRA_HARNESS_ARN` para sobrescrever,
+caso o Harness seja recriado).
 
 ### 2) Sessão exploratória
-Converse manualmente com o agente (console AgentCore ou via `agent_client.py`
-em um script REPL) por 60–90 min seguindo o charter em
-`exploratoria/sessao_exploratoria.md`, preenchendo a tabela de observações.
+Converse manualmente com o agente (playground do Harness no console
+AgentCore, ou via `agent_client.py` em um script REPL) por 60–90 min
+seguindo o charter em `exploratoria/sessao_exploratoria.md`, preenchendo a
+tabela de observações.
 
 ### 3) Rodar o golden dataset + DeepEval (Frente B)
 ```bash
-export UMBRA_AGENT_ARN=<arn-do-agente>
-export JUDGE_MODEL_ID=amazon.nova-micro-v1:0
 deepeval test run avaliacao/deepeval/test_agent.py
 ```
 
@@ -108,8 +100,7 @@ Finalize `relatorio/relatorio_final.md` com os números reais obtidos.
 
 ## Estratégia de custo
 
-Agente em modelo mínimo (Titan Text Lite) + juiz mínimo (Nova Micro), ambos
-na mesma conta AWS, e Knowledge Base em **S3 Vectors** (não OpenSearch
+Juiz mínimo (Nova Micro) e Knowledge Base gerenciada (não OpenSearch
 Serverless, que cobra por capacidade reservada mesmo ocioso), para caber
 no orçamento de créditos disponível. Ver seção 1.4 de `planejamento.md`
 para os riscos do agente/juiz, e a seção 5 para a escolha do armazenamento
