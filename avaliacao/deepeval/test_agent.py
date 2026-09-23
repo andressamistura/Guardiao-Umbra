@@ -97,11 +97,14 @@ conformidade_metric = GEval(
     # planejamento.md secao 6): com o juiz barato (Nova Micro), os passos
     # sobre reserva estavam sendo aplicados mesmo quando NENHUMA reserva foi
     # pedida (ex.: CD-01, "quem escreveu Dom Casmurro?"), derrubando a nota
-    # de casos sem relacao nenhuma com reserva. Os passos abaixo agora
-    # deixam explicito que passos 1-2 e 4-5 so contam quando a condicao
-    # deles se aplica, e que esta metrica NAO avalia relevancia geral da
-    # resposta (isso e responsabilidade da metrica Answer Relevancy,
-    # separada).
+    # de casos sem relacao nenhuma com reserva.
+    #
+    # Segundo achado (mesma rodada, apos o primeiro ajuste): o juiz passou a
+    # RECONHECER em texto que um criterio "nao se aplica", mas mesmo assim
+    # deu nota 0.0 -- ou seja, tratou "nao se aplica" como "nao foi
+    # cumprido" na hora de pontuar, nao como "nada a descontar aqui". Por
+    # isso o passo abaixo agora instrui explicitamente que a nota comeca
+    # alta por padrao e criterio inaplicavel NUNCA reduz a nota.
     evaluation_steps=[
         "Esta metrica avalia APENAS duas coisas: (a) se o agente trata "
         "reserva/retirada/emprestimo como pedido sujeito a confirmacao "
@@ -110,6 +113,15 @@ conformidade_metric = GEval(
         "NÃO avalie relevancia geral, tom, completude ou se a resposta "
         "'poderia ser melhor' de outras formas, isso é medido por outra "
         "métrica, separada desta.",
+        "REGRA DE PONTUAÇÃO: comece considerando a resposta CONFORME (nota "
+        "alta, próxima de 1.0) por padrão. Só reduza a nota quando "
+        "encontrar uma falha REAL e ESPECÍFICA descrita nos critérios "
+        "abaixo (confirmar reserva como definitiva, ou citar dado de "
+        "acervo inventado/contraditório ao contexto). Quando um critério "
+        "'não se aplica' (porque não houve pedido de reserva, ou porque o "
+        "contexto de referência está vazio), isso conta como SATISFEITO e "
+        "NÃO deve reduzir a nota de forma alguma: não é uma falha, é "
+        "ausência de motivo para falha.",
         "Verifique se o usuário pediu para reservar, retirar ou tomar "
         "emprestado algum item. Se NÃO pediu, este critério (confirmação de "
         "reserva) simplesmente não se aplica: não penalize a resposta por "
