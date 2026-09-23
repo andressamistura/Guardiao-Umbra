@@ -107,3 +107,107 @@ Essa combinação (agente e juiz no nível mais barato do catálogo Bedrock) é
 a estratégia de economia deste desafio, dentro do orçamento de créditos
 disponível, com os riscos de estabilidade das notas assumidos e
 documentados acima.
+
+**Atualização (23/09/2026):** o modelo `amazon.titan-text-lite-v1` foi
+retirado do seletor de modelos do console (0 resultados de busca), portanto
+o plano acima ficou desatualizado. Ver seção 6 para o modelo do agente
+efetivamente usado e para os testes que motivaram a escolha final.
+
+## 5. Armazenamento vetorial da Knowledge Base: S3 Vectors (não OpenSearch Serverless)
+
+Por padrão, uma Knowledge Base do Bedrock usa o Amazon OpenSearch
+Serverless como armazenamento vetorial, que cobra por capacidade reservada
+mesmo com baixo uso (relatos de outros participantes do fellowship: cerca
+de US$2,69 no primeiro dia, podendo passar de US$40-50 em uma semana),
+inviável para um orçamento de US$20/mês.
+
+Por isso, a Knowledge Base deste projeto usa **Amazon S3 Vectors**
+(armazenamento vetorial nativo do S3, cobrado por uso, sem capacidade
+reservada) como alternativa, seguindo também a recomendação dada em aula.
+Isso é montado com chamadas diretas de boto3 em
+`agente/agentcore_setup.py` (criação do bucket/índice vetorial, do service
+role da KB e da própria Knowledge Base apontando para o índice), em vez do
+método de conveniência do `bedrock-agentcore-starter-toolkit`, que cria
+OpenSearch Serverless automaticamente.
+
+**Recomendação de monitoramento:** mesmo com S3 Vectors, configure um
+alarme de orçamento (AWS Budgets) em ~US$15-18 para ter folga de aviso
+antes de estourar o limite de US$20/mês.
+
+## 6. Deploy real: AWS Console (Harness) em vez do script, e achados sobre o modelo do agente
+
+O `agente/agentcore_setup.py` (seção 5) documenta a arquitetura planejada via
+boto3 direto. Na prática, o usuário `guardiao-umbra-dev` (IAM estático,
+configurado via CLI) recebeu um "explicit deny" de origem não visível
+(provavelmente uma restrição de conta/organização do fellowship) ao tentar
+criar bucket S3 pela CLI, o que inviabilizou rodar o script como estava
+planejado.
+
+O deploy final foi então feito inteiramente pelo **console da AWS**, usando
+a identidade SSO `AlunoAdmin` (mais permissiva, disponibilizada pelo
+fellowship), em três peças do AgentCore:
+
+1. **Knowledge Base gerenciada** (`bedrock/knowledge-bases`, tipo "Managed
+   vector store", KB ID `G1WY8400BE`): a própria AWS recomenda esse fluxo
+   "for optimized combination of ease-of-use, accuracy and cost", e ele
+   evita o OpenSearch Serverless por padrão sem precisar do script de S3
+   Vectors da seção 5 (que fica documentado no repositório como a
+   alternativa via código, mas não foi o caminho usado neste deploy).
+2. **AgentCore Gateway** (`guardiao-umbra-gateway`), expondo a Knowledge
+   Base como ferramenta MCP (`target-quick-start-f622d4___Retrieve`), com
+   Inbound/Outbound Auth via IAM role (sem precisar de um provedor OAuth
+   externo).
+3. **AgentCore Harness** (`guardiao_umbra_harness`), a opção "sem
+   infraestrutura" do AgentCore (não usa o
+   `bedrock-agentcore-starter-toolkit` nem builda container Docker, ao
+   contrário do que o `agentcore_setup.py` original previa): modelo, system
+   prompt, Memory (curto prazo, sem estratégias de longo prazo entre
+   sessões) e a ferramenta Gateway são configurados direto pelo console.
+
+**Achado: incompatibilidade da família Nova com tool calling nesse Gateway.**
+Testado no Harness playground com a mesma pergunta ("Vocês têm o livro Dom
+Casmurro? Quantos exemplares disponíveis?"), os três modelos Nova
+disponíveis falharam de forma consistente e idêntica:
+
+| Modelo testado | Resultado |
+|---|---|
+| `amazon.titan-text-lite-v1` | Não disponível no seletor de modelo (removido do catálogo do console) |
+| Nova Micro | `modelStreamErrorException`: "Model produced invalid sequence as part of ToolUse" |
+| Nova Lite | Mesmo erro |
+| Nova Pro | Mesmo erro |
+| Claude Haiku | A chamada de ferramenta funcionou (retornou resultados reais da KB, score 0.999), mas a geração da resposta final falhou com `AccessDeniedException`: falta a ação IAM `aws-marketplace:ViewSubscriptions`/`aws-marketplace:Subscribe`, necessária para ativar modelos de terceiros (Claude) via AWS Marketplace, outra restrição de conta do fellowship, análoga ao bloqueio de S3 já reportado. |
+
+Ou seja, o problema não é "modelo fraco demais" (Nova Pro também falhou) e
+sim uma incompatibilidade real entre a família Nova e o schema de ferramenta
+gerado por esse Gateway MCP, um achado técnico válido para o relatório,
+independente da causa raiz exata. O Claude Haiku é, tecnicamente, o modelo
+que funciona corretamente com essa Knowledge Base/Gateway, mas seu uso
+depende de uma liberação de permissão de Marketplace ainda pendente com o
+admin do fellowship (mensagem enviada em 22/09/2026).
+
+**Resolução (23/09/2026): modelo final = `Qwen3-Coder-30B-A3B-Instruct`.**
+O admin do fellowship (Jacques de Jesus Figueredo Schmitz J.) confirmou em
+mensagem no grupo que todos os modelos Anthropic exigem essa mesma
+permissão extra de AWS Marketplace nesta conta (não é um problema
+específico desta conta individual, é uma restrição geral do ambiente do
+fellowship) e recomendou tentar modelos de outros provedores. Um colega
+relatou sucesso com Qwen3 30B A3B; testado no Harness playground
+(`Model source = Bedrock`, busca por "qwen"), o modelo
+**Qwen3-Coder-30B-A3B-Instruct** chamou a ferramenta de RAG corretamente
+(`Target-Quick-Start-F622d4 Retrieve`, score de relevância 0,973-0,999) nos
+três testes de validação:
+1. Consulta direta com exemplar existente no acervo (Dom Casmurro):
+   respondeu corretamente com autor, disponibilidade e sinopse.
+2. Pergunta de acompanhamento multi-turno na mesma sessão ("esse mesmo tem
+   tradução em inglês?"): manteve o livro em foco (memória funcionando) e
+   respondeu honestamente que não há registro de tradução no acervo, sem
+   inventar um dado, oferecendo alternativas.
+3. Livro inexistente no acervo ("A Revolução dos Bichos", Orwell): recusou
+   corretamente, sem alucinar, e sugeriu títulos reais do acervo.
+
+Isso fecha a escolha de modelo do agente: `Qwen3-Coder-30B-A3B-Instruct`
+via Bedrock, não Nova (incompatível com o Gateway) nem Claude (bloqueado
+por Marketplace). O modelo juiz permanece `amazon.nova-micro-v1:0` (seção
+4), já que o Nova só falha como *agente* que precisa chamar ferramenta via
+esse Gateway específico, não como juiz de avaliação de texto (papel em que
+não invoca essa ferramenta).

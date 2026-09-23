@@ -94,6 +94,14 @@ S3_VECTOR_INDEX = os.environ.get("S3_VECTOR_INDEX", "guardiao-umbra-index")
 BEDROCK_KB_ROLE_ARN = os.environ.get("BEDROCK_KB_ROLE_ARN")
 ROLE_NAME_KB = "GuardiaoUmbraKBRole"
 
+# ID de uma Knowledge Base já criada manualmente (ex.: pelo console do
+# Bedrock, usando "Create Managed Knowledge Base"). Se informado, o script
+# PULA toda a criação de bucket/índice/role/KB e vai direto para criar o
+# agente usando essa KB pronta. Use isso quando seu usuário não tem
+# permissão de S3/IAM para o fluxo automático via boto3, mas um perfil com
+# mais acesso (ex.: um role de admin do console) já criou a KB por você.
+EXISTING_KB_ID = os.environ.get("UMBRA_KB_ID")
+
 AGENT_NAME = "guardiao-umbra"
 KB_NAME = f"{AGENT_NAME}-kb"
 
@@ -376,12 +384,18 @@ def criar_agente(kb_id: str, sess: boto3.Session):
 def main():
     sess = boto3.Session(region_name=AWS_REGION)
 
-    documentos = preparar_documentos_kb()
-    subir_documentos_s3(sess, documentos)
+    if EXISTING_KB_ID:
+        # Caminho curto: KB já criada (ex.: via console, com um perfil que
+        # tinha mais permissão), não precisa criar bucket/índice/role/KB.
+        print(f"Usando Knowledge Base existente: {EXISTING_KB_ID}")
+        kb_id = EXISTING_KB_ID
+    else:
+        documentos = preparar_documentos_kb()
+        subir_documentos_s3(sess, documentos)
 
-    indice_arn = criar_bucket_e_indice_vetorial(sess)
-    role_arn = obter_ou_criar_role_kb(sess)
-    kb_id = criar_knowledge_base(sess, indice_arn, role_arn)
+        indice_arn = criar_bucket_e_indice_vetorial(sess)
+        role_arn = obter_ou_criar_role_kb(sess)
+        kb_id = criar_knowledge_base(sess, indice_arn, role_arn)
 
     criar_agente(kb_id, sess)
 
