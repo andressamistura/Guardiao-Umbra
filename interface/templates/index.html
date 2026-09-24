@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Guardião Umbra</title>
+<style>
+  :root {
+    --roxo-escuro: #1b0f2e;
+    --roxo-medio: #3d2266;
+    --roxo-vivo: #6b3fa0;
+    --lilas: #b895e0;
+    --lilas-claro: #e6d9ff;
+    --dourado: #d9b872;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: 'Georgia', 'Palatino Linotype', serif;
+    background: radial-gradient(ellipse at top, #2a1550 0%, #150826 55%, #0a0415 100%);
+    color: var(--lilas-claro);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow-x: hidden;
+  }
+
+  /* Estrelas cintilantes de fundo */
+  .estrelas {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+  }
+  .estrela {
+    position: absolute;
+    width: 2px;
+    height: 2px;
+    background: var(--lilas-claro);
+    border-radius: 50%;
+    opacity: 0.6;
+    animation: cintilar 3s ease-in-out infinite;
+  }
+  @keyframes cintilar {
+    0%, 100% { opacity: 0.15; transform: scale(1); }
+    50% { opacity: 0.9; transform: scale(1.6); }
+  }
+
+  header {
+    z-index: 1;
+    text-align: center;
+    padding: 2.2rem 1rem 1rem;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 2.1rem;
+    letter-spacing: 3px;
+    background: linear-gradient(90deg, var(--lilas), var(--dourado), var(--lilas));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 0 0 30px rgba(184, 149, 224, 0.5);
+  }
+  header p {
+    margin: 0.4rem 0 0;
+    color: #a793c9;
+    font-style: italic;
+    font-size: 0.95rem;
+  }
+  header .sigilo {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 0.3rem;
+    filter: drop-shadow(0 0 10px var(--lilas));
+  }
+
+  .container {
+    z-index: 1;
+    width: 100%;
+    max-width: 680px;
+    padding: 0 1rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+  }
+
+  .chat {
+    flex: 1;
+    min-height: 55vh;
+    max-height: 62vh;
+    overflow-y: auto;
+    background: rgba(30, 15, 55, 0.55);
+    border: 1px solid rgba(184, 149, 224, 0.35);
+    border-radius: 18px;
+    padding: 1.2rem;
+    backdrop-filter: blur(6px);
+    box-shadow: 0 0 40px rgba(107, 63, 160, 0.35), inset 0 0 60px rgba(107, 63, 160, 0.08);
+    scrollbar-width: thin;
+    scrollbar-color: var(--roxo-vivo) transparent;
+  }
+  .chat::-webkit-scrollbar { width: 6px; }
+  .chat::-webkit-scrollbar-thumb { background: var(--roxo-vivo); border-radius: 6px; }
+
+  .msg {
+    max-width: 82%;
+    margin: 0.55rem 0;
+    padding: 0.7rem 1rem;
+    border-radius: 14px;
+    line-height: 1.45;
+    font-size: 0.96rem;
+    white-space: pre-wrap;
+    animation: surgir 0.35s ease;
+  }
+  @keyframes surgir {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .msg.usuario {
+    margin-left: auto;
+    background: linear-gradient(135deg, var(--roxo-vivo), #8a54c9);
+    color: #fdf9ff;
+    border-bottom-right-radius: 3px;
+    box-shadow: 0 2px 14px rgba(138, 84, 201, 0.45);
+  }
+  .msg.agente {
+    margin-right: auto;
+    background: rgba(80, 50, 120, 0.55);
+    border: 1px solid rgba(184, 149, 224, 0.3);
+    border-bottom-left-radius: 3px;
+    color: var(--lilas-claro);
+  }
+  .msg.erro {
+    margin-right: auto;
+    background: rgba(120, 40, 60, 0.5);
+    border: 1px solid rgba(230, 130, 150, 0.4);
+    color: #ffd9e0;
+  }
+  .msg .rotulo {
+    display: block;
+    font-size: 0.68rem;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    opacity: 0.65;
+    margin-bottom: 0.25rem;
+  }
+
+  .digitando {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    margin: 0.4rem 0.2rem;
+    color: var(--lilas);
+    font-size: 0.85rem;
+    font-style: italic;
+  }
+  .digitando.ativo { display: flex; }
+  .ponto {
+    width: 6px; height: 6px;
+    background: var(--lilas);
+    border-radius: 50%;
+    animation: pulsar 1.2s infinite ease-in-out;
+  }
+  .ponto:nth-child(2) { animation-delay: 0.2s; }
+  .ponto:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes pulsar {
+    0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+    30% { opacity: 1; transform: translateY(-3px); }
+  }
+
+  form {
+    display: flex;
+    gap: 0.6rem;
+    margin-top: 1rem;
+  }
+  input[type="text"] {
+    flex: 1;
+    padding: 0.85rem 1.1rem;
+    border-radius: 14px;
+    border: 1px solid rgba(184, 149, 224, 0.4);
+    background: rgba(20, 10, 40, 0.65);
+    color: var(--lilas-claro);
+    font-family: inherit;
+    font-size: 0.96rem;
+    outline: none;
+    transition: box-shadow 0.2s, border-color 0.2s;
+  }
+  input[type="text"]:focus {
+    border-color: var(--lilas);
+    box-shadow: 0 0 0 3px rgba(184, 149, 224, 0.2);
+  }
+  input[type="text"]::placeholder { color: #8570a8; }
+
+  button {
+    padding: 0.85rem 1.3rem;
+    border: none;
+    border-radius: 14px;
+    background: linear-gradient(135deg, var(--roxo-vivo), #9b5ce0);
+    color: #fdf9ff;
+    font-family: inherit;
+    font-size: 0.95rem;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    box-shadow: 0 3px 16px rgba(155, 92, 224, 0.45);
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  button:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 5px 22px rgba(155, 92, 224, 0.6);
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+
+  footer {
+    z-index: 1;
+    color: #6f5a91;
+    font-size: 0.75rem;
+    padding-bottom: 1.2rem;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div class="estrelas" id="estrelas"></div>
+
+<header>
+  <div class="sigilo">
+    <svg width="72" height="60" viewBox="0 0 100 84" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <defs>
+        <linearGradient id="abaChapeu" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#2a1a40"/>
+          <stop offset="100%" stop-color="#120a1f"/>
+        </linearGradient>
+        <linearGradient id="coneChapeu" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#3d2266"/>
+          <stop offset="100%" stop-color="#160c28"/>
+        </linearGradient>
+        <linearGradient id="fivela" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#f0cf7a"/>
+          <stop offset="100%" stop-color="#d9b872"/>
+        </linearGradient>
+      </defs>
+      <ellipse cx="46" cy="68" rx="44" ry="12" fill="url(#abaChapeu)"/>
+      <path d="M46 4 C58 4 66 22 70 34 C82 32 90 40 88 48 C70 56 34 58 16 52 C22 34 30 4 46 4 Z"
+            fill="url(#coneChapeu)"/>
+      <path d="M70 34 C82 32 90 40 88 48 C80 51 72 52 65 52 C64 44 66 38 70 34 Z"
+            fill="#241536" opacity="0.7"/>
+      <circle cx="34" cy="16" r="1.6" fill="#e6d9ff" opacity="0.8"/>
+      <rect x="16" y="50" width="60" height="10" rx="4" fill="#6b3fa0"/>
+      <rect x="16" y="50" width="60" height="10" rx="4" fill="url(#fivela)" opacity="0.0"/>
+      <rect x="38" y="49" width="16" height="12" rx="2" fill="none" stroke="url(#fivela)" stroke-width="3"/>
+      <rect x="44" y="53" width="4" height="4" fill="url(#fivela)"/>
+    </svg>
+  </div>
+  <h1>GUARDIÃO UMBRA</h1>
+  <p>assistente da Bibliotheca Umbra</p>
+</header>
+
+<div class="container">
+  <div class="chat" id="chat">
+    <div class="msg agente">
+      <span class="rotulo">Guardião Umbra</span>
+      Seja bem-vinda(o) à Bibliotheca Umbra. Posso ajudar a consultar o acervo, verificar disponibilidade de livros, explicar regras de empréstimo, ou registrar um pedido de reserva. Como posso ajudar?
+    </div>
+  </div>
+
+  <div class="digitando" id="digitando">
+    <span class="ponto"></span><span class="ponto"></span><span class="ponto"></span>
+    <span>o Guardião está consultando o acervo...</span>
+  </div>
+
+  <form id="form-chat">
+    <input type="text" id="entrada" placeholder="Pergunte sobre um livro, disponibilidade, ou regras..." autocomplete="off" autofocus>
+    <button type="submit" id="botao-enviar">Enviar</button>
+  </form>
+</div>
+
+<footer>Desafio 2 · Guardião Umbra · sessão local, não enviada a mais ninguém</footer>
+
+<script>
+  // Campo de estrelas decorativo
+  const camadaEstrelas = document.getElementById('estrelas');
+  for (let i = 0; i < 70; i++) {
+    const e = document.createElement('div');
+    e.className = 'estrela';
+    e.style.left = Math.random() * 100 + 'vw';
+    e.style.top = Math.random() * 100 + 'vh';
+    e.style.animationDelay = (Math.random() * 3) + 's';
+    camadaEstrelas.appendChild(e);
+  }
+
+  const chat = document.getElementById('chat');
+  const form = document.getElementById('form-chat');
+  const entrada = document.getElementById('entrada');
+  const botao = document.getElementById('botao-enviar');
+  const digitando = document.getElementById('digitando');
+
+  // Mantém a mesma sessão (memória multi-turno) enquanto a página estiver aberta.
+  let sessionId = null;
+
+  function adicionarMensagem(texto, tipo, rotulo) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + tipo;
+    if (rotulo) {
+      const r = document.createElement('span');
+      r.className = 'rotulo';
+      r.textContent = rotulo;
+      div.appendChild(r);
+    }
+    div.appendChild(document.createTextNode(texto));
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const mensagem = entrada.value.trim();
+    if (!mensagem) return;
+
+    adicionarMensagem(mensagem, 'usuario', 'Você');
+    entrada.value = '';
+    entrada.disabled = true;
+    botao.disabled = true;
+    digitando.classList.add('ativo');
+    chat.scrollTop = chat.scrollHeight;
+
+    try {
+      const resp = await fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mensagem, session_id: sessionId })
+      });
+      const dados = await resp.json();
+      if (dados.ok) {
+        sessionId = dados.session_id;
+        adicionarMensagem(dados.resposta, 'agente', 'Guardião Umbra');
+      } else {
+        adicionarMensagem('Não consegui falar com o Guardião agora: ' + (dados.erro || 'erro desconhecido'), 'erro', 'Erro');
+      }
+    } catch (e) {
+      adicionarMensagem('Falha de conexão com o servidor local: ' + e, 'erro', 'Erro');
+    } finally {
+      digitando.classList.remove('ativo');
+      entrada.disabled = false;
+      botao.disabled = false;
+      entrada.focus();
+    }
+  });
+</script>
+
+</body>
+</html>
