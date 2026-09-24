@@ -39,14 +39,22 @@ sys.path.append(str(Path(__file__).resolve().parents[2] / "agente"))
 from agent_client import AgentClient  # noqa: E402
 from bedrock_judge import BedrockJudgeModel  # noqa: E402
 
+# Achado de 24/09/2026 (ver planejamento.md secao 6): com amazon.nova-micro
+# como juiz, mesmo apos deixar o checklist do GEval de conformidade
+# explicito sobre criterios inaplicaveis, uma parte dos casos ainda zerava
+# sem motivo real (ruido do juiz, nao falha do agente). Trocado para
+# amazon.nova-lite-v1:0 (ainda barato, mas mais capaz que o Micro) para
+# reduzir esse ruido. Se a conta nao tiver acesso a esse modelo habilitado
+# no Bedrock, habilite em Model access no console antes de rodar.
+
 # Juiz "normal": temperature=0, sem repetição extra (Answer Relevancy e
 # Faithfulness já fazem várias chamadas internas por caso; repetir tudo de
 # novo encareceria sem necessidade).
-JUDGE_MODEL = BedrockJudgeModel(model_id="amazon.nova-micro-v1:0", self_consistency_n=1)
+JUDGE_MODEL = BedrockJudgeModel(model_id="amazon.nova-lite-v1:0", self_consistency_n=1)
 
-# Juiz "robusto": mesmo modelo barato, mas com autoconsistência (3 chamadas,
+# Juiz "robusto": mesmo modelo, mas com autoconsistência (3 chamadas,
 # resposta mais frequente), reservado para a métrica mais subjetiva/crítica.
-JUDGE_MODEL_ROBUSTO = BedrockJudgeModel(model_id="amazon.nova-micro-v1:0", self_consistency_n=3)
+JUDGE_MODEL_ROBUSTO = BedrockJudgeModel(model_id="amazon.nova-lite-v1:0", self_consistency_n=3)
 
 DATASET_PATH = Path(__file__).resolve().parents[2] / "dataset" / "golden_dataset.json"
 
