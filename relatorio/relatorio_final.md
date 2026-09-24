@@ -1,7 +1,7 @@
 # Relatório Final: Desafio 2, Agente Guardião da Umbra
 
 **Autora:** Andressa Mistura
-**Data:** [preencher data de entrega]
+**Data:** 24/09/2026
 
 ---
 
