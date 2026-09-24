@@ -1,3 +1,8 @@
 deepeval>=1.0.0
 boto3>=1.34.0
 pytest>=7.4.0
+# Windows apenas: sem isso, o cache em disco do DeepEval falha ao adquirir
+# lock compartilhado (msvcrt não suporta) e derruba todo teste como FAILED
+# mesmo quando a métrica passou (ver planejamento.md, seção 4, achado de
+# 24/09/2026).
+portalocker[win32]; sys_platform == "win32"

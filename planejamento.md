@@ -113,6 +113,49 @@ retirado do seletor de modelos do console (0 resultados de busca), portanto
 o plano acima ficou desatualizado. Ver seção 6 para o modelo do agente
 efetivamente usado e para os testes que motivaram a escolha final.
 
+**Atualização (24/09/2026): juiz trocado de Nova Micro para Nova Lite.**
+Mesmo depois do ajuste no checklist do G-Eval de conformidade (comentário em
+`avaliacao/deepeval/test_agent.py`), uma parte dos casos com Nova Micro
+ainda zerava sem motivo real (ruído do juiz mais barato, não falha do
+agente). Trocado para `amazon.nova-lite-v1:0` (ainda barato, mas mais capaz
+que o Micro) para reduzir esse ruído — ver `JUDGE_MODEL`/`JUDGE_MODEL_ROBUSTO`
+em `test_agent.py`.
+
+**Resultado da suíte com Nova Lite (rodada de 24/09/2026, Windows, 32
+avaliações de métrica no total):** 93,75% de aprovação (30 passaram, 2
+falharam), medido pelo resumo interno do DeepEval ("Evaluation completed"),
+não pelo exit code do pytest — ver achado sobre bug de cache abaixo. As duas
+falhas reais foram ambas em Answer Relevancy/Faithfulness (o G-Eval de
+conformidade passou 100% dos 32 casos):
+- Caso sobre "A Hora da Estrela": Faithfulness 0,67 — a resposta do agente
+  afirmou 3 exemplares disponíveis quando o contexto recuperado dizia que
+  não havia nenhum exemplar disponível (contradição/alucinação de dado de
+  acervo, exatamente o risco #2 da seção 2).
+- Caso sobre "O Silmarillion": Faithfulness 0,62 — a resposta contradisse o
+  contexto recuperado sobre a presença do livro nos resultados de busca e
+  sobre disponibilidade de informação de reserva.
+
+Ambos são achados válidos para o relatório (falha real de fidelidade ao
+acervo em 2 de 32 casos), não ruído do juiz.
+
+**Achado: bug de cache do DeepEval no Windows mascarava o resultado real no
+pytest.** Na mesma rodada, todos os 32 testes pytest apareceram como
+`FAILED` (`32 failed, 7 warnings`), mas o resumo interno do próprio DeepEval
+("Evaluation completed", ao final da saída) mostrou 30/32 aprovados. A causa
+é um bug de escrita de cache em disco do DeepEval no Windows, não uma falha
+de avaliação: `deepeval/test_run/cache.py` tenta adquirir um lock
+compartilhado via `msvcrt`, que não suporta lock compartilhado real no
+Windows (mensagem: "Shared locks on Windows require the win32 extra
+(pywin32)"), a aquisição falha, `get_cached_test_run` retorna `None`, e a
+tentativa seguinte de gravar no cache (`cached_test_run.test_cases_lookup_map[...]`)
+lança `AttributeError: 'NoneType' object has no attribute
+'test_cases_lookup_map'` — isso ocorre depois da avaliação da métrica já ter
+sido feita, então o pytest reporta falha mesmo quando o caso passou. Fix:
+instalar o extra `portalocker[win32]` (ver `avaliacao/deepeval/requirements.txt`).
+Ao reportar resultados desta suíte no relatório, usar o resumo "Evaluation
+completed" do próprio DeepEval (ou reexecutar após instalar o extra), nunca
+o `X failed` bruto do pytest nesta plataforma.
+
 ## 5. Armazenamento vetorial da Knowledge Base: S3 Vectors (não OpenSearch Serverless)
 
 Por padrão, uma Knowledge Base do Bedrock usa o Amazon OpenSearch
